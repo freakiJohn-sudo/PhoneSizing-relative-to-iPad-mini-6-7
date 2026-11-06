@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- Critical: Prevent zooming to maintain strict 1:1 pixel scaling on the iPad -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Multi-Device Real Size on iPad Mini 7</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+        :root {
+            /* 
+               iPad Mini 7 hardware calibration:
+               Physical PPI: 326
+               Device Pixel Ratio: 2
+               CSS Pixels Per Inch (PPI): 163 
+               Pixels Per Millimeter: 163 / 25.4 = 6.4173 px/mm
+            */
+            --px-per-mm: 6.4173px;
+            --outer-radius: calc(6 * var(--px-per-mm)); /* Default outer corner */
+            --inner-radius: calc(4 * var(--px-per-mm)); /* Default screen corner */
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #050505;
+            /* Creating an exact 1cm x 1cm physical grid for visual reference */
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: calc(10 * var(--px-per-mm)) calc(10 * var(--px-per-mm));
+            background-position: center center;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Canvas behaves like a fixed desk */
+            touch-action: none; /* Prevent all default touch behaviors */
+            color: white;
+        }
+
+        #fold-device {
+            position: absolute;
+            background: #171717;
+            /* Hardware acceleration and smooth transitions */
+            transform: translate3d(0,0,0); 
+            will-change: transform;
+            cursor: grab;
+            display: flex;
+            user-select: none;
+            -webkit-user-select: none;
+            transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1), 
+                        height 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+                        border-radius 0.4s ease,
+                        border-width 0.4s ease,
+                        padding 0.4s ease,
+                        box-shadow 0.4s ease;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.8), 0 0 0 1px #333 inset, inset 0 0 10px rgba(255,255,255,0.05);
+        }
+
+        #fold-device:active {
+            cursor: grabbing;
+        }
+
+        .fold-screen {
+            width: 100%;
+            height: 100%;
+            border-radius: var(--inner-radius);
+            position: relative;
+            overflow: hidden;
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.8);
+            transition: background 0.4s ease, border-radius 0.4s ease;
+        }
+
+        /* Center crease of the fold */
+        .crease {
+            position: absolute;
+            pointer-events: none;
+            z-index: 10;
+            transition: all 0.4s ease;
+        }
+
+        /* Camera Cutout (Hole punch or UDC) */
+        .camera-cutout {
+            position: absolute;
+            border-radius: 50%;
+            z-index: 20;
+            transition: all 0.4s ease;
+        }
+
+        /* iPhone Dynamic Island */
+        .dynamic-island {
+            position: absolute;
+            background: #000;
+            border-radius: 999px;
+            z-index: 30;
+            transition: all 0.4s ease;
+            box-shadow: inset 0 0 2px rgba(255,255,255,0.2);
+        }
+
+        /* Foldable Taskbar */
+        .taskbar {
+            position: absolute;
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: 100px;
+            padding: calc(1.5 * var(--px-per-mm));
+            display: flex;
+            gap: calc(2 * var(--px-per-mm));
+            border: 1px solid rgba(255,255,255,0.1);
+            z-index: 20;
+            transition: all 0.4s ease;
+        }
+
+        .app-icon {
+            width: calc(7 * var(--px-per-mm)); 
+            height: calc(7 * var(--px-per-mm));
+            border-radius: 20%;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            flex-shrink: 0;
+        }
+
+        /* Dimension Labels */
+        .dimension-label {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            pointer-events: none;
+            white-space: nowrap;
+            transition: opacity 0.3s;
+        }
+
+        /* Panel Animation Grid */
+        #panel-content-wrapper {
+            display: grid;
+            transition: grid-template-rows 0.3s ease-out;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="fixed top-4 left-4 z-50 bg-[#121212]/85 backdrop-blur-xl p-5 rounded-3xl border border-white/10 shadow-2xl w-80 font-sans text-white">
+        
+        <!-- Header / Minimize Toggle -->
+        <div class="flex justify-between items-center select-none cursor-pointer group" id="btn-minimize-header">
+            <div>
+                <h1 class="text-lg font-bold text-white tracking-tight leading-tight">Real-World Sizer</h1>
+                <p class="text-xs text-neutral-400 font-medium mt-0.5">1:1 on iPad Mini 7</p>
+            </div>
+            <div class="bg-white/10 p-2 rounded-full group-hover:bg-white/20 transition-colors">
+                <svg id="minimize-icon" class="w-4 h-4 text-white transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path></svg>
+            </div>
+        </div>
+        
+        <!-- Collapsible Content -->
+        <div id="panel-content-wrapper" style="grid-template-rows: 1fr;">
+            <div id="panel-content" class="overflow-hidden">
+                <div class="pt-6 space-y-5">
+                    
+                    <!-- Device Selector -->
+                    <div>
+                        <label class="text-[10px] text-neutral-400 uppercase tracking-widest font-bold mb-2 block">Device Model</label>
+                        <select id="device-select" class="w-full bg-[#1e1e1e] text-sm text-white rounded-xl p-3 border border-white/10 outline-none focus:border-sky-500 transition-colors cursor-pointer appearance-none">
+                            <option value="fold8">Galaxy Z Fold 8 (Passport)</option>
+                            <option value="iphoneduo">Apple iPhone Duo</option>
+                            <option value="fold8ultra">Galaxy Z Fold 8 Ultra</option>
+                            <option value="iphone15pro">iPhone 15 Pro</option>
+                            <option value="surfaceduo2">Microsoft Surface Duo 2</option>
+                        </select>
+                    </div>
+                    
+                    <!-- State Toggle (Hidden for Candybars) -->
+                    <div id="state-toggle-container">
+                        <label class="text-[10px] text-neutral-400 uppercase tracking-widest font-bold mb-2 block">Folding State</label>
+                        <div class="flex bg-[#1e1e1e] p-1 rounded-xl border border-white/10">
+                            <button id="btn-unfolded" class="flex-1 text-sm py-2 rounded-lg bg-neutral-600 text-white shadow-sm transition-all font-medium">Unfolded</button>
+                            <button id="btn-folded" class="flex-1 text-sm py-2 rounded-lg text-neutral-400 hover:text-white transition-all font-medium">Folded</button>
+                        </div>
+                    </div>
+
+                    <!-- Live Dimensions Stats -->
+                    <div class="bg-[#1e1e1e] p-3 rounded-xl border border-white/10 space-y-2 text-xs">
+                        <div class="flex justify-between items-center text-neutral-300">
+                            <span class="font-medium">Width</span>
+                            <span id="stat-w" class="text-white font-semibold">-- mm</span>
+                        </div>
+                        <div class="flex justify-between items-center text-neutral-300">
+                            <span class="font-medium">Height</span>
+                            <span id="stat-h" class="text-white font-semibold">-- mm</span>
+                        </div>
+                        <div class="flex justify-between items-center text-neutral-300">
+                            <span class="font-medium">Thickness</span>
+                            <span id="stat-t" class="text-white font-semibold">-- mm</span>
+                        </div>
+                        <div class="flex justify-between items-center text-neutral-300 pt-1 border-t border-white/5">
+                            <span class="font-medium">Active Screen</span>
+                            <span id="stat-s" class="text-sky-400 font-semibold">--</span>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex gap-3 pt-1">
+                        <button id="btn-rotate" class="flex-1 bg-[#1e1e1e] hover:bg-neutral-700 text-white py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 border border-white/10">
+                            Rotate 90°
+                        </button>
+                        <button id="btn-center" class="flex-1 bg-sky-600 hover:bg-sky-500 text-white py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95 shadow-lg shadow-sky-900/50">
+                            Re-Center
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="fold-device">
+        <!-- Measurement Labels -->
+        <div id="label-width" class="dimension-label" style="top: -45px; left: 50%; transform: translateX(-50%);"></div>
+        <div id="label-height" class="dimension-label" style="right: -95px; top: 50%; transform: translateY(-50%);"></div>
+
+        <div id="fold-screen" class="fold-screen">
+            <!-- Dynamic Elements inside the screen -->
+            <div class="crease" id="crease"></div>
+            <div class="camera-cutout" id="camera-cutout"></div>
+            <div class="dynamic-island" id="dynamic-island"></div>
+
+            <!-- Taskbar -->
+            <div class="taskbar" id="taskbar">
+                <div class="app-icon" style="background: linear-gradient(135deg, #ef4444, #b91c1c);"></div>
+                <div class="app-icon" style="background: linear-gradient(135deg, #10b981, #047857);"></div>
+                <div class="app-icon" style="background: linear-gradient(135deg, #f59e0b, #b45309);"></div>
+                <div class="app-icon" style="background: linear-gradient(135deg, #8b5cf6, #6d28d9);"></div>
+                <div class="w-px h-full bg-white/20 mx-1"></div> 
+                <div class="app-icon" style="background: linear-gradient(135deg, #64748b, #334155);"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Elements
+            const el = document.getElementById('fold-device');
+            const screenEl = document.getElementById('fold-screen');
+            const crease = document.getElementById('crease');
+            const cameraCutout = document.getElementById('camera-cutout');
+            const dynamicIsland = document.getElementById('dynamic-island');
+            const taskbar = document.getElementById('taskbar');
+            
+            const labelWidth = document.getElementById('label-width');
+            const labelHeight = document.getElementById('label-height');
+            
+            const btnCenter = document.getElementById('btn-center');
+            const btnRotate = document.getElementById('btn-rotate');
+            const btnMinimizeHeader = document.getElementById('btn-minimize-header');
+            const minimizeIcon = document.getElementById('minimize-icon');
+            const panelWrapper = document.getElementById('panel-content-wrapper');
+            
+            const deviceSelect = document.getElementById('device-select');
+            const stateToggleContainer = document.getElementById('state-toggle-container');
+            const btnUnfolded = document.getElementById('btn-unfolded');
+            const btnFolded = document.getElementById('btn-folded');
+
+            // Constants & Calibration
+            const pxPerMm = 6.4173; 
+            
+            // Device Database (Dimensions in mm)
+            const deviceData = {
+                fold8: {
+                    name: 'Galaxy Z Fold 8',
+                    states: {
+                        unfolded: { w: 161.4, h: 123.9, t: 4.5, screen: '7.6" Dynamic AMOLED', type: 'inner' },
+                        folded: { w: 81.9, h: 123.9, t: 9.7, screen: '6.2" Cover Display', type: 'cover' }
+                    }
+                },
+                iphoneduo: {
+                    name: 'Apple iPhone Duo',
+                    states: {
+                        unfolded: { w: 164.6, h: 117.8, t: 5.2, screen: '7.58" Super Retina XDR', type: 'inner-apple' },
+                        folded: { w: 84.1, h: 117.8, t: 11.3, screen: '5.36" Cover Display', type: 'cover' }
+                    }
+                },
+                fold8ultra: {
+                    name: 'Galaxy Z Fold 8 Ultra',
+                    states: {
+                        unfolded: { w: 143.2, h: 158.4, t: 4.1, screen: '8.0" Dynamic AMOLED', type: 'inner' },
+                        folded: { w: 72.8, h: 158.4, t: 8.9, screen: '6.5" Cover Display', type: 'cover' }
+                    }
+                },
+                iphone15pro: {
+                    name: 'iPhone 15 Pro',
+                    states: {
+                        unfolded: { w: 70.6, h: 146.6, t: 8.25, screen: '6.1" Super Retina XDR', type: 'candybar' }
+                    }
+                },
+                surfaceduo2: {
+                    name: 'Microsoft Surface Duo 2',
+                    states: {
+                        unfolded: { w: 184.5, h: 145.2, t: 5.5, screen: '8.3" Dual PixelSense', type: 'inner-dual' },
+                        folded: { w: 92.1, h: 145.2, t: 11.0, screen: 'Exterior Glass (No Screen)', type: 'cover-blank' }
+                    }
+                }
+            };
+
+            // Current App State
+            let currentDevice = 'fold8';
+            let currentState = 'unfolded';
+            let isRotated = false;
+            let currentX = 0;
+            let currentY = 0;
+            let isDragging = false;
+            let startX, startY, initialX, initialY;
+            let isPanelMinimized = false;
+
+            function applyDeviceState() {
+                const config = deviceData[currentDevice].states[currentState];
+                
+                // 1. Calculate orientation dimensions
+                const w = isRotated ? config.h : config.w;
+                const h = isRotated ? config.w : config.h;
+
+                // 2. Apply dimensions to DOM
+                el.style.width = `${w * pxPerMm}px`;
+                el.style.height = `${h * pxPerMm}px`;
+                labelWidth.textContent = `${w} mm`;
+                labelHeight.textContent = `${h} mm`;
+
+                // Update Stats Panel
+                document.getElementById('stat-w').textContent = `${config.w} mm`;
+                document.getElementById('stat-h').textContent = `${config.h} mm`;
+                document.getElementById('stat-t').textContent = `${config.t} mm`;
+                document.getElementById('stat-s').textContent = config.screen;
+
+                // 3. Reset hardware visual overrides
+                el.style.borderTopLeftRadius = 'var(--outer-radius)';
+                el.style.borderTopRightRadius = 'var(--outer-radius)';
+                el.style.borderBottomLeftRadius = 'var(--outer-radius)';
+                el.style.borderBottomRightRadius = 'var(--outer-radius)';
+                el.style.borderLeft = 'none';
+                el.style.borderTop = 'none';
+                el.style.padding = `calc(2.5 * var(--px-per-mm))`; // default bezel
+                
+                // Shadow implies thickness
+                if (config.type === 'cover') {
+                    el.style.boxShadow = '0 50px 80px rgba(0,0,0,0.9), 15px 15px 25px rgba(0,0,0,0.4), inset 0 0 10px rgba(255,255,255,0.05)';
+                } else {
+                    el.style.boxShadow = '0 30px 60px rgba(0,0,0,0.8), 0 0 0 1px #333 inset, inset 0 0 10px rgba(255,255,255,0.05)';
+                }
+
+                // 4. Render specific screen types
+                if (config.type === 'candybar') {
+                    // iPhone Look
+                    screenEl.style.background = 'linear-gradient(135deg, #1e3a8a, #0f172a)';
+                    crease.style.display = 'none';
+                    taskbar.style.display = 'none';
+                    cameraCutout.style.display = 'none';
+                    dynamicIsland.style.display = 'block';
+                    el.style.padding = `calc(1.5 * var(--px-per-mm))`; // Thinner iPhone bezels
+                    
+                    if (isRotated) {
+                        dynamicIsland.style.width = `calc(4 * var(--px-per-mm))`;
+                        dynamicIsland.style.height = `calc(18 * var(--px-per-mm))`;
+                        dynamicIsland.style.top = '50%';
+                        dynamicIsland.style.left = `calc(2.5 * var(--px-per-mm))`;
+                        dynamicIsland.style.transform = 'translateY(-50%)';
+                    } else {
+                        dynamicIsland.style.width = `calc(18 * var(--px-per-mm))`;
+                        dynamicIsland.style.height = `calc(4 * var(--px-per-mm))`;
+                        dynamicIsland.style.top = `calc(2.5 * var(--px-per-mm))`;
+                        dynamicIsland.style.left = '50%';
+                        dynamicIsland.style.transform = 'translateX(-50%)';
+                    }
+                } 
+                else if (config.type === 'cover' || config.type === 'cover-blank') {
+                    // Folded Cover Screen Look
+                    screenEl.style.background = config.type === 'cover-blank' 
+                        ? 'linear-gradient(135deg, #262626, #171717)' // Exterior glass look
+                        : 'linear-gradient(135deg, #020617, #4c1d95)';
+                    
+                    crease.style.display = 'none';
+                    taskbar.style.display = 'none';
+                    dynamicIsland.style.display = 'none';
+                    
+                    if (config.type === 'cover-blank') {
+                        cameraCutout.style.display = 'none';
+                    } else {
+                        // Hole punch camera
+                        cameraCutout.style.display = 'block';
+                        cameraCutout.style.width = `calc(2.5 * var(--px-per-mm))`;
+                        cameraCutout.style.height = `calc(2.5 * var(--px-per-mm))`;
+                        cameraCutout.style.opacity = '1';
+                        cameraCutout.style.background = 'black';
+                        cameraCutout.style.backdropFilter = 'none';
+                        cameraCutout.style.border = 'none';
+                        
+                        if (isRotated) {
+                            cameraCutout.style.top = '50%';
+                            cameraCutout.style.right = `calc(3 * var(--px-per-mm))`;
+                            cameraCutout.style.left = 'auto';
+                            cameraCutout.style.transform = 'translateY(-50%)';
+                        } else {
+                            cameraCutout.style.top = `calc(3 * var(--px-per-mm))`;
+                            cameraCutout.style.right = 'auto';
+                            cameraCutout.style.left = '50%';
+                            cameraCutout.style.transform = 'translateX(-50%)';
+                        }
+                    }
+
+                    // Render Hinge (Left side default, Top if rotated)
+                    if (isRotated) {
+                        el.style.borderTop = `calc(4 * var(--px-per-mm)) solid #2a2a2a`; 
+                        el.style.borderTopLeftRadius = `calc(1.5 * var(--px-per-mm))`;
+                        el.style.borderTopRightRadius = `calc(1.5 * var(--px-per-mm))`;
+                        el.style.paddingTop = `calc(1.5 * var(--px-per-mm))`;
+                    } else {
+                        el.style.borderLeft = `calc(4 * var(--px-per-mm)) solid #2a2a2a`; 
+                        el.style.borderTopLeftRadius = `calc(1.5 * var(--px-per-mm))`;
+                        el.style.borderBottomLeftRadius = `calc(1.5 * var(--px-per-mm))`;
+                        el.style.paddingLeft = `calc(1.5 * var(--px-per-mm))`;
+                    }
+                } 
+                else {
+                    // Unfolded Inner Screen Look (inner, inner-dual, inner-apple)
+                    if (config.type === 'inner-dual') {
+                        screenEl.style.background = 'linear-gradient(135deg, #0ea5e9 0%, #1e40af 100%)';
+                    } else if (config.type === 'inner-apple') {
+                        // iOS 27 Nano-Texture aesthetic wallpaper
+                        screenEl.style.background = 'radial-gradient(circle at 30% 30%, #38bdf8 0%, #1d4ed8 45%, #090d16 100%)';
+                    } else {
+                        screenEl.style.background = 'linear-gradient(135deg, #0f172a 0%, #3b0764 50%, #831843 100%)';
+                    }
+                        
+                    dynamicIsland.style.display = 'none';
+                    taskbar.style.display = config.type === 'inner-dual' ? 'none' : 'flex';
+                    crease.style.display = 'block';
+                    
+                    // Both Surface Duo 2 and iPhone Duo have no visible camera cutout on the inner screen
+                    if (config.type === 'inner-dual' || config.type === 'inner-apple') {
+                        cameraCutout.style.display = 'none';
+                    } else {
+                        // UDC (Under Display Camera)
+                        cameraCutout.style.display = 'block';
+                        cameraCutout.style.width = `calc(2.5 * var(--px-per-mm))`;
+                        cameraCutout.style.height = `calc(2.5 * var(--px-per-mm))`;
+                        cameraCutout.style.opacity = '0.3';
+                        cameraCutout.style.background = 'rgba(0,0,0,0.5)';
+                        cameraCutout.style.backdropFilter = 'blur(2px)';
+                        cameraCutout.style.border = '1px solid rgba(255,255,255,0.1)';
+                    }
+                    
+                    if (isRotated) {
+                        // Crease Horizontal
+                        crease.style.width = '100%';
+                        crease.style.height = `calc(4 * var(--px-per-mm))`;
+                        crease.style.left = '0';
+                        crease.style.top = '50%';
+                        crease.style.transform = 'translateY(-50%)';
+                        crease.style.background = config.type === 'inner-dual' 
+                            ? '#111' // Solid opaque physical hinge
+                            : 'linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.3) 30%, rgba(255,255,255,0.05) 50%, rgba(0,0,0,0.3) 70%, transparent 100%)';
+                        
+                        // Taskbar / Dock Position when rotated
+                        if (config.type === 'inner-apple') {
+                            // iOS 27 side dock rotates to the bottom
+                            taskbar.style.flexDirection = 'row';
+                            taskbar.style.bottom = `calc(2 * var(--px-per-mm))`;
+                            taskbar.style.right = 'auto';
+                            taskbar.style.left = '50%';
+                            taskbar.style.top = 'auto';
+                            taskbar.style.transform = 'translateX(-50%)';
+                        } else {
+                            taskbar.style.flexDirection = 'column';
+                            taskbar.style.bottom = 'auto';
+                            taskbar.style.left = 'auto';
+                            taskbar.style.right = `calc(2 * var(--px-per-mm))`;
+                            taskbar.style.top = '50%';
+                            taskbar.style.transform = 'translateY(-50%)';
+                        }
+
+                        // UDC Position
+                        cameraCutout.style.top = '25%';
+                        cameraCutout.style.left = 'auto';
+                        cameraCutout.style.right = `calc(3 * var(--px-per-mm))`;
+                        cameraCutout.style.transform = 'none';
+                    } else {
+                        // Crease Vertical
+                        crease.style.width = `calc(4 * var(--px-per-mm))`;
+                        crease.style.height = '100%';
+                        crease.style.top = '0';
+                        crease.style.left = '50%';
+                        crease.style.transform = 'translateX(-50%)';
+                        crease.style.background = config.type === 'inner-dual'
+                            ? '#111' // Solid opaque physical hinge
+                            : 'linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.3) 30%, rgba(255,255,255,0.05) 50%, rgba(0,0,0,0.3) 70%, transparent 100%)';
+                        
+                        // Taskbar / Dock Position (Default Unfolded)
+                        if (config.type === 'inner-apple') {
+                            // iOS 27 places the dock vertically on the right side by default
+                            taskbar.style.flexDirection = 'column';
+                            taskbar.style.bottom = 'auto';
+                            taskbar.style.left = 'auto';
+                            taskbar.style.right = `calc(2 * var(--px-per-mm))`;
+                            taskbar.style.top = '50%';
+                            taskbar.style.transform = 'translateY(-50%)';
+                        } else {
+                            taskbar.style.flexDirection = 'row';
+                            taskbar.style.bottom = `calc(2 * var(--px-per-mm))`;
+                            taskbar.style.right = 'auto';
+                            taskbar.style.left = '50%';
+                            taskbar.style.top = 'auto';
+                            taskbar.style.transform = 'translateX(-50%)';
+                        }
+
+                        // UDC Position
+                        cameraCutout.style.top = `calc(3 * var(--px-per-mm))`;
+                        cameraCutout.style.right = '25%';
+                        cameraCutout.style.left = 'auto';
+                        cameraCutout.style.transform = 'none';
+                    }
+                }
+            }
+
+            function centerDevice() {
+                const config = deviceData[currentDevice].states[currentState];
+                const w = (isRotated ? config.h : config.w) * pxPerMm;
+                const h = (isRotated ? config.w : config.h) * pxPerMm;
+                currentX = (window.innerWidth - w) / 2;
+                currentY = (window.innerHeight - h) / 2;
+                updateTransform();
+            }
+
+            function updateTransform() {
+                el.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
+            }
+
+            // Dragging Logic (Pointer Events for Touch + Mouse)
+            el.addEventListener('pointerdown', (e) => {
+                isDragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                initialX = currentX;
+                initialY = currentY;
+                el.setPointerCapture(e.pointerId);
+                el.style.transition = 'none'; // Disable transition during drag for 1:1 feel
+                
+                // Hide labels while dragging
+                labelWidth.style.opacity = '0';
+                labelHeight.style.opacity = '0';
+            });
+
+            el.addEventListener('pointermove', (e) => {
+                if (!isDragging) return;
+                currentX = initialX + (e.clientX - startX);
+                currentY = initialY + (e.clientY - startY);
+                updateTransform();
+            });
+
+            const endDrag = (e) => {
+                if(!isDragging) return;
+                isDragging = false;
+                el.releasePointerCapture(e.pointerId);
+                
+                // Restore transition config
+                el.style.transition = 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1), height 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.4s ease, border-width 0.4s ease, padding 0.4s ease, box-shadow 0.4s ease';
+                
+                labelWidth.style.opacity = '1';
+                labelHeight.style.opacity = '1';
+            };
+
+            el.addEventListener('pointerup', endDrag);
+            el.addEventListener('pointercancel', endDrag);
+
+            // UI Interaction Handlers
+            btnCenter.addEventListener('click', centerDevice);
+
+            btnRotate.addEventListener('click', () => {
+                isRotated = !isRotated;
+                applyDeviceState();
+                setTimeout(centerDevice, 50);
+            });
+
+            deviceSelect.addEventListener('change', (e) => {
+                currentDevice = e.target.value;
+                isRotated = false; // Reset rotation on device change
+                
+                if (currentDevice === 'iphone15pro') {
+                    stateToggleContainer.style.display = 'none';
+                    currentState = 'unfolded'; // Default state for candybar
+                } else {
+                    stateToggleContainer.style.display = 'block';
+                }
+                
+                applyDeviceState();
+                setTimeout(centerDevice, 50);
+            });
+
+            function updateStateButtons() {
+                if (currentState === 'unfolded') {
+                    btnUnfolded.className = 'flex-1 text-sm py-2 rounded-lg bg-neutral-600 text-white shadow-sm transition-all font-medium';
+                    btnFolded.className = 'flex-1 text-sm py-2 rounded-lg text-neutral-400 hover:text-white transition-all font-medium';
+                } else {
+                    btnFolded.className = 'flex-1 text-sm py-2 rounded-lg bg-neutral-600 text-white shadow-sm transition-all font-medium';
+                    btnUnfolded.className = 'flex-1 text-sm py-2 rounded-lg text-neutral-400 hover:text-white transition-all font-medium';
+                }
+                applyDeviceState();
+                setTimeout(centerDevice, 50);
+            }
+
+            btnUnfolded.addEventListener('click', () => { currentState = 'unfolded'; updateStateButtons(); });
+            btnFolded.addEventListener('click', () => { currentState = 'folded'; updateStateButtons(); });
+
+            // Minimize Panel Logic
+            btnMinimizeHeader.addEventListener('click', () => {
+                isPanelMinimized = !isPanelMinimized;
+                if (isPanelMinimized) {
+                    panelWrapper.style.gridTemplateRows = '0fr';
+                    minimizeIcon.style.transform = 'rotate(180deg)';
+                } else {
+                    panelWrapper.style.gridTemplateRows = '1fr';
+                    minimizeIcon.style.transform = 'rotate(0deg)';
+                }
+            });
+
+            // Prevent Safari Zoom
+            document.addEventListener('touchmove', (e) => {
+                if (e.scale !== 1) e.preventDefault();
+            }, { passive: false });
+
+            // Initialize
+            applyDeviceState();
+            centerDevice();
+            
+            // Keep roughly on screen upon window resize
+            window.addEventListener('resize', () => { if(!isDragging) centerDevice(); });
+        });
+    </script>
+</body>
+</html>
